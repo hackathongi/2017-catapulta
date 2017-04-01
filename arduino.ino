@@ -1,26 +1,66 @@
+#include <Servo.h>
 #include <ESP8266WiFi.h>
- 
-const char* ssid = "tarla";   //hackathongi
-const char* password = "tarla2017hack"; //tarla2017
- 
-int ledPin = 13; // GPIO13
-int value = LOW;
-  
+
+Servo servo;
+
+//NOMBRE DE CRIDES
+#define N_CRIDES 2
+
+
+const char* ssid = "tarla";
+const char* password = "tarla2017hack";
+
 WiFiServer server(80);
- 
-void setup() {
+
+struct parametre{
+  String nom;
+  String valor;
+};
+
+struct entrada{
+  String nom;
+  String (*funcio)(parametre params[]);
+};
+
+entrada entrades[N_CRIDES]; 
+
+String ipToString(IPAddress ip){
+  String s="";
+  for (int i=0; i<4; i++)
+    s += i  ? "." + String(ip[i]) : String(ip[i]);
+  return s;
+}
+
+//is mandatory to implement this function with your device
+String status(parametre params[]){
+  String myDeviceIsA = "catapulta";
+  return "I'm the :" + myDeviceIsA + ", my IP is " + ipToString(WiFi.localIP());
+}
+
+String subir(parametre params[]){
+  
+  servo.write(45);
+  delay(3000);
+  servo.write(0);
+
+  return "TOT PERFECT";
+}
+
+void setup(){
+  servo.attach(16);
+  servo.write(0);
   Serial.begin(115200);
   delay(10);
- 
-  pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, LOW);
  
   // Connect to WiFi network
   Serial.println();
   Serial.println();
+  IPAddress ip(192, 168, 2, 100);
+  IPAddress gateway(192, 168, 1, 1); // set gateway to match your network
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.config(ip, gateway, subnet);
   Serial.print("Connecting to ");
   Serial.println(ssid);
- 
   WiFi.begin(ssid, password);
  
   while (WiFi.status() != WL_CONNECTED) {
@@ -39,7 +79,19 @@ void setup() {
   Serial.print("http://");
   Serial.print(WiFi.localIP());
   Serial.println("/");
- 
+
+  //don't overwrite status function, don't forget to implement it.
+  entrada e0;
+  e0.nom = "status";
+  e0.funcio = status;
+  entrades[0] = e0;
+
+  //customize your functions here:
+  entrada e1;
+  e1.nom = "shot";
+  e1.funcio = subir;
+  entrades[1] = e1;
+
 }
  
 void loop() {
@@ -57,26 +109,62 @@ void loop() {
  
   // Read the first line of the request
   String request = client.readStringUntil('\r');
-  Serial.println(request);
-  client.flush();
- 
-  // Match the request 
-
-  if (request.indexOf("/SHOT") != -1  or request.indexOf("/shot") != -1 )  {
-    shot();
-  }
- 
-  // Return the response
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("OK"); //  do not forget this one
+  String url = request.substring(request.indexOf(' ')+1, request.lastIndexOf(' '));
+  Serial.println(url);
   
-  delay(1);
-  Serial.println("Client disonnected");
-  Serial.println("");
- 
-}
-
-void shot() {
-
+  int indexParam = url.indexOf("?");
+  String nomFuncio = url.substring(url.lastIndexOf("/")+1, indexParam);
+  Serial.print("Nom funcio ");
+  Serial.println(nomFuncio);
+  
+  int nParams = 0;
+  if(url.indexOf('?') != -1){
+    nParams++;
+  }
+  if(nParams > 0){
+    Serial.println("dins");
+    int posicio = 0;
+    while((posicio = url.indexOf('&', posicio+1)) != -1){Serial.print("posicio");Serial.println(posicio);nParams++;}
+  }
+  
+  parametre parametres[nParams];  
+    
+  if(nParams > 0){
+    String p = url.substring(indexParam+1, url.length());
+    int fi = p.indexOf('&');
+    for(int i = 0; i < nParams; i++){
+      Serial.println("url");
+      Serial.println(p);
+      if(fi == -1){
+        fi = p.length();
+      }
+      int posIgual = p.indexOf('=');
+      parametres[i] = {p.substring(0, posIgual),p.substring(posIgual+1, fi)};
+      p = p.substring(fi+1, url.length());
+      fi = p.indexOf('&');
+      
+      Serial.print("Parametre nom:");
+      Serial.print(parametres[i].nom);
+      Serial.print(" valor: ");
+      Serial.println(parametres[i].valor);
+      Serial.println();
+    } 
+  }
+  
+  int index = 0;
+  while(index < N_CRIDES && nomFuncio != entrades[index].nom){
+    index++;
+  }
+  if (index < N_CRIDES) {
+    String resposta = entrades[index].funcio(parametres);
+  
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");  
+    client.println("");  
+    client.println(resposta);    
+    
+    Serial.println(resposta);
+  }
+  client.flush();
+  client.stop();
 }
